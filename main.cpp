@@ -9,6 +9,8 @@
 #include <fstream> // Reading .csv file(s)
 #include <vector> // List to hold parsed trades
 #include <map> // Key-value lookups
+#include <algorithm> // Min and max
+#include <regex> // For pattern matching
 
 using namespace std;
 
@@ -28,84 +30,115 @@ struct CompanyMetrics {
 
 // Parses a single CSV line into a Trade struct
 Trade parseLine(string inputString) {
-    Trade trade;
-    stringstream ss(inputString);
-    string field1, field2, field3, field4;
+    try {
+        Trade trade;
+        stringstream ss(inputString);
+        string field1, field2, field3, field4;
+        regex pattern(R"(^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$)");
 
-    getline(ss, field1, ',');
-    trade.ticker = field1;
+        if( !getline(ss, field1, ',') || 
+            !getline(ss, field2, ',') ||
+            !getline(ss, field3, ',') || 
+            !getline(ss, field4, ',')) 
+        {
+            throw runtime_error("Missing fields");
+        }
 
-    getline(ss, field2, ',');
-    trade.price = stod(field2); // stod will throw an error if data is corrupted
+        trade.ticker = field1;
+        trade.price = stod(field2); // stod will throw an error if data is corrupted
+        trade.volume = stol(field3); // stol will throw an error if data is corrupted
+        trade.timestamp = field4;
 
-    getline(ss, field3, ',');
-    trade.volume = stol(field3); // stol will throw an error if data is corrupted
+        // If price is less than 0, or volume is less than 0, throw an error
+        if (trade.price < 0 || trade.volume < 0) {
+            throw invalid_argument("Negative price or volume");
+        }
 
-    getline(ss, field4, ',');
-    trade.timestamp = field4;
+        if (trade.ticker.empty()) {
+            throw invalid_argument("Ticker is empty");
+        }
 
-    return trade;
+        if (trade.timestamp.length() != 19) {
+            throw invalid_argument("Incorrect timestamp format");
+        }
+
+        if (!std::regex_match(trade.timestamp, pattern)) {
+            throw std::invalid_argument("Malformed timestamp format");
+        }
+
+        return trade;
+    } catch (const exception& e) {
+        // Catch errors with e.what(), automatically outputting the reason for the error message
+        cout << "Skipping bad row. Reason: " << e.what() << endl;
+        
+        return Trade{"", 0.0, 0, ""};
+    }
 }
 
-int main()
-{
-    string filename = "trades.csv";
+vector<Trade> loadTrades(const string& filename) {
+    vector<Trade> trades;
     ifstream file(filename);
 
     if (!file.is_open()) {
         // Exit early if the file is missing or corrupted
-        cout << "Error: Could not open file!" << endl;
-        return 1;
+        throw runtime_error("Error: Could not open file!");
+    }
 
-    } else {
-        vector<Trade> trades;
-        string line;
-        map<string, CompanyMetrics> statsMap;
-        
-        // Read the file line-by-line until the end
-        while(getline(file, line)) {
-            Trade tempTrade = parseLine(line);
+    string line;
+    // Read the file line-by-line until the end
+    while(getline(file, line)) {
+        Trade tempTrade = parseLine(line);
+        if (tempTrade.ticker != "") {
             trades.push_back(tempTrade);
         }
-
-        // Populating Company Metrics for each company
-        // const auto& avoids copying the structs in memory on every loop iteration
-        for (const auto& t : trades) { 
-            cout << "Ticker: " << t.ticker << ", Price: " << t.price << ", Volume: " << t.volume << ", Timestamp: " << t.timestamp << endl;
-
-            // Use & to get the address of the actual metrics in the map so they can be changed directly
-            CompanyMetrics& stats = statsMap[t.ticker];
-
-            // Add the current trade's volume and total weighted value to the running sums
-            stats.totalVolume += t.volume;
-            stats.weightedPriceSum += (t.volume * t.price);
-
-            // If this is the first trade we've seen for this company, set it to our starting min and max
-            if (stats.minPrice == -1.0) {
-                stats.minPrice = t.price;
-                stats.maxPrice = t.price;
-            } else {
-                // Otherwise, check if this trade's price is a new minimum or maximum in the company's dataset
-                if (t.price <= stats.minPrice) {
-                    stats.minPrice = t.price;
-                } 
-                if (t.price >= stats.maxPrice) {
-                    stats.maxPrice = t.price;
-                }
-            }
-        }
-
-        // Print final analytics for each unique company in the map
-        for (const auto& pair : statsMap) {
-            double vwap;
-            
-            // VWAP = (Total Money Traded) / (Total Shares Traded)
-            vwap = pair.second.weightedPriceSum / pair.second.totalVolume;
-            cout << "Ticker: " << pair.first 
-                 << ", VWAP: " << vwap 
-                 << ", Minimum Price: " << pair.second.minPrice 
-                 << ", Maximum Price: " << pair.second.maxPrice 
-                 << ", Total Volume: " << pair.second.totalVolume << endl;
-        }
     }
+
+    return trades;
+}
+
+map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
+    map<string, CompanyMetrics> statsMap;
+
+    // Populating Company Metrics for each company
+    // const auto& avoids copying the structs in memory on every loop iteration
+    for (const auto& t : trades) { 
+        cout << "Ticker: " << t.ticker << ", Price: " << t.price << ", Volume: " << t.volume << ", Timestamp: " << t.timestamp << endl;
+
+        // Use & to get the address of the actual metrics in the map so they can be changed directly
+        CompanyMetrics& stats = statsMap[t.ticker];
+
+        // Add the current trade's volume and total weighted value to the running sums
+        stats.totalVolume += t.volume;
+        stats.weightedPriceSum += (t.volume * t.price);
+
+        stats.minPrice = (stats.minPrice == -1.0) ? t.price : min(stats.minPrice, t.price);
+        stats.maxPrice = (stats.maxPrice == -1.0) ? t.price : max(stats.maxPrice, t.price);
+    }
+
+    return statsMap;
+}
+
+void printReport(const map<string, CompanyMetrics>& statsMap) {
+    // Print final analytics for each unique company in the map
+    for (const auto& pair : statsMap) {
+        double vwap = 0.0;
+        
+        // VWAP = (Total Money Traded) / (Total Shares Traded)
+        if (pair.second.totalVolume > 0) {
+            vwap = pair.second.weightedPriceSum / pair.second.totalVolume;
+        }
+        
+        cout << "Ticker: " << pair.first 
+                << ", VWAP: " << vwap 
+                << ", Minimum Price: " << pair.second.minPrice 
+                << ", Maximum Price: " << pair.second.maxPrice 
+                << ", Total Volume: " << pair.second.totalVolume << endl;
+    }
+}
+
+int main()
+{
+    vector<Trade> trades = loadTrades("trades.csv");
+    map<string, CompanyMetrics> statsMap = computeMetrics(trades);
+    printReport(statsMap);
 }
