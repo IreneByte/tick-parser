@@ -8,10 +8,12 @@
 #include <sstream> // String splitting
 #include <fstream> // Reading .csv file(s)
 #include <vector> // List to hold parsed trades
-#include <map> // Key-value lookups
+#include <unordered_map> // Key-value lookups
 #include <algorithm> // Min and max
 #include <regex> // For pattern matching
 #include <thread> // Multiple threads
+#include <chrono> // Single vs multi-threaded benchmark
+#include <iomanip> // Formatting decimals
 
 using namespace std;
 
@@ -101,8 +103,8 @@ vector<Trade> loadTrades(const string& filename) {
 }
 
 // Calculates stock analytics from a collection of trades
-map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
-    map<string, CompanyMetrics> statsMap;
+unordered_map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
+    unordered_map<string, CompanyMetrics> statsMap;
 
     // Populating Company Metrics for each company
     // const auto& avoids copying the structs in memory on every loop iteration
@@ -122,7 +124,7 @@ map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
 }
 
 // Displays final calculated metrics to the screen
-void printReport(const map<string, CompanyMetrics>& statsMap) {
+void printReport(const unordered_map<string, CompanyMetrics>& statsMap) {
     // Print final analytics for each unique company in the map
     for (const auto& pair : statsMap) {
         double vwap = 0.0;
@@ -161,16 +163,16 @@ vector<vector<Trade>> partitionTrades(const vector<Trade>& trades, int numThread
 }
 
 // Runs calculations on one assigned partition
-void processPartition(vector<Trade>& trades, map<string, CompanyMetrics>& result) {
+void processPartition(vector<Trade>& trades, unordered_map<string, CompanyMetrics>& result) {
     result = computeMetrics(trades);
 }
 
 // Merges all thread maps into one final map
-map<string, CompanyMetrics> mergeResults(vector<map<string, CompanyMetrics>> partitions, int numWorkers) {
-    map<string, CompanyMetrics> result;
+unordered_map<string, CompanyMetrics> mergeResults(vector<unordered_map<string, CompanyMetrics>> partitions, int numWorkers) {
+    unordered_map<string, CompanyMetrics> result;
 
     // Iterate through each partition in the split vector
-    for (map<string, CompanyMetrics>& p : partitions) {
+    for (unordered_map<string, CompanyMetrics>& p : partitions) {
         // Iterate through each pair in each map
         for (const pair<string, CompanyMetrics> t : p) {
             string ticker = t.first;
@@ -188,14 +190,9 @@ map<string, CompanyMetrics> mergeResults(vector<map<string, CompanyMetrics>> par
     return result;
 }
 
-// Runs the program from start to finish
-int main()
-{
-    vector<Trade> trades = loadTrades("trades.csv");
-
-    int numWorkers = 4;
+unordered_map<string, CompanyMetrics> runMultithreaded(const vector<Trade>& trades, int numWorkers) {
     vector<vector<Trade>> partitions = partitionTrades(trades, numWorkers);
-    vector<map<string, CompanyMetrics>> partition_results(numWorkers);
+    vector<unordered_map<string, CompanyMetrics>> partition_results(numWorkers);
 
     vector<thread> workers;
     for (int i = 0; i < numWorkers; i++) {
@@ -209,6 +206,31 @@ int main()
     }
 
     // Merge the results of the workers
-    map<string, CompanyMetrics> merged = mergeResults(partition_results, numWorkers);
-    printReport(merged);
+    return mergeResults(partition_results, numWorkers);
+}
+
+void runBenchmark(const vector<Trade>& trades) {
+    double baselineTime, speedup;
+
+    for (int n : {1, 2, 4, 8}) {
+        auto start = chrono::high_resolution_clock::now();
+        runMultithreaded(trades, n);
+        auto end = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed = end - start;
+        baselineTime = (n == 1) ? elapsed.count() : baselineTime;
+        speedup = (n != 1) ? baselineTime / elapsed.count() : 1.00;
+        cout << "Threads: " << n << ", Time: " << fixed << setprecision(3) << elapsed.count() << " seconds, Speedup: " << speedup << "x" << endl;
+    }
+}
+
+
+// Runs the program from start to finish
+int main()
+{
+    vector<Trade> trades = loadTrades("trades.csv");
+
+    // unordered_map<string, CompanyMetrics> merged = runMultithreaded(trades, 4);
+    // printReport(merged);
+
+    runBenchmark(trades);
 }
