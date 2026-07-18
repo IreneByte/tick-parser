@@ -5,6 +5,12 @@
         "fstream": "cpp",
         "vector": "cpp",
         "string": "cpp",
-        "deque": "cpp"
+        "deque": "cpp",
+        "map": "cpp",
+        "tuple": "cpp",
+        "array": "cpp",
+        "string_view": "cpp",
+        "ranges": "cpp",
+        "span": "cpp"
     }
 }

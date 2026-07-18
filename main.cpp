@@ -106,9 +106,7 @@ map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
 
     // Populating Company Metrics for each company
     // const auto& avoids copying the structs in memory on every loop iteration
-    for (const auto& t : trades) { 
-        cout << "Ticker: " << t.ticker << ", Price: " << t.price << ", Volume: " << t.volume << ", Timestamp: " << t.timestamp << endl;
-
+    for (const Trade& t : trades) { 
         // Use & to get the address of the actual metrics in the map so they can be changed directly
         CompanyMetrics& stats = statsMap[t.ticker];
 
@@ -167,6 +165,29 @@ void processPartition(vector<Trade>& trades, map<string, CompanyMetrics>& result
     result = computeMetrics(trades);
 }
 
+// Merges all thread maps into one final map
+map<string, CompanyMetrics> mergeResults(vector<map<string, CompanyMetrics>> partitions, int numWorkers) {
+    map<string, CompanyMetrics> result;
+
+    // Iterate through each partition in the split vector
+    for (map<string, CompanyMetrics>& p : partitions) {
+        // Iterate through each pair in each map
+        for (const pair<string, CompanyMetrics> t : p) {
+            string ticker = t.first;
+            if (result.count(ticker) == 0) { // Add new aggregated stock if not in map
+                result.insert(t);
+            } else { // Combine totals if stock exists
+                result[ticker].totalVolume += t.second.totalVolume;
+                result[ticker].weightedPriceSum += t.second.weightedPriceSum;
+                result[ticker].minPrice = min(t.second.minPrice, result[ticker].minPrice);
+                result[ticker].maxPrice = max(t.second.maxPrice, result[ticker].maxPrice);
+            }
+        }
+    }
+
+    return result;
+}
+
 // Runs the program from start to finish
 int main()
 {
@@ -186,4 +207,8 @@ int main()
         // Joins background thread execution back into main
         w.join();
     }
+
+    // Merge the results of the workers
+    map<string, CompanyMetrics> merged = mergeResults(partition_results, numWorkers);
+    printReport(merged);
 }
