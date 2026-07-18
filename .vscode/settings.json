@@ -1,6 +1,10 @@
 {
     "files.associations": {
         "ostream": "cpp",
-        "stdexcept": "cpp"
+        "stdexcept": "cpp",
+        "fstream": "cpp",
+        "vector": "cpp",
+        "string": "cpp",
+        "deque": "cpp"
     }
 }

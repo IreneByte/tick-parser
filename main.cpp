@@ -11,9 +11,11 @@
 #include <map> // Key-value lookups
 #include <algorithm> // Min and max
 #include <regex> // For pattern matching
+#include <thread> // Multiple threads
 
 using namespace std;
 
+// Holds data for a single trade record
 struct Trade {
     std::string ticker;
     double price;
@@ -21,6 +23,7 @@ struct Trade {
     std::string timestamp; // Expected format: YYYY-MM-DDTHH:MM:SS
 };
 
+// Holds calculated metrics for a stock ticker
 struct CompanyMetrics {
     double minPrice = -1.0; 
     double maxPrice = -1.0; // -1.0 is a flag meaning "no trades seen yet"
@@ -75,6 +78,7 @@ Trade parseLine(string inputString) {
     }
 }
 
+// Reads the CSV file and loads valid records into memory
 vector<Trade> loadTrades(const string& filename) {
     vector<Trade> trades;
     ifstream file(filename);
@@ -96,6 +100,7 @@ vector<Trade> loadTrades(const string& filename) {
     return trades;
 }
 
+// Calculates stock analytics from a collection of trades
 map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
     map<string, CompanyMetrics> statsMap;
 
@@ -118,6 +123,7 @@ map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades) {
     return statsMap;
 }
 
+// Displays final calculated metrics to the screen
 void printReport(const map<string, CompanyMetrics>& statsMap) {
     // Print final analytics for each unique company in the map
     for (const auto& pair : statsMap) {
@@ -136,9 +142,48 @@ void printReport(const map<string, CompanyMetrics>& statsMap) {
     }
 }
 
+// Splits data into equal parts for the threads
+vector<vector<Trade>> partitionTrades(const vector<Trade>& trades, int numThreads) {
+    vector<vector<Trade>> threads;
+    int threadSize = trades.size() / numThreads;
+
+    for (int i = 0; i < numThreads; i++) {
+        int start = i * threadSize;
+        int end = (i * threadSize) + threadSize;
+
+        if (trades.size() - end <= threadSize) {
+            end = trades.size();
+        }
+
+        vector<Trade> partition(trades.begin() + start, trades.begin() + end);
+        threads.push_back(partition);
+    }
+
+    return threads;
+}
+
+// Runs calculations on one assigned partition
+void processPartition(vector<Trade>& trades, map<string, CompanyMetrics>& result) {
+    result = computeMetrics(trades);
+}
+
+// Runs the program from start to finish
 int main()
 {
     vector<Trade> trades = loadTrades("trades.csv");
-    map<string, CompanyMetrics> statsMap = computeMetrics(trades);
-    printReport(statsMap);
+
+    int numWorkers = 4;
+    vector<vector<Trade>> partitions = partitionTrades(trades, numWorkers);
+    vector<map<string, CompanyMetrics>> partition_results(numWorkers);
+
+    vector<thread> workers;
+    for (int i = 0; i < numWorkers; i++) {
+        // Pass references directly to prevent copying data
+        workers.push_back(thread(processPartition, ref(partitions[i]), ref(partition_results[i])));
+    }
+
+    for (thread& w : workers) {
+        // Joins background thread execution back into main
+        w.join();
+    }
 }
