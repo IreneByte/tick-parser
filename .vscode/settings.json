@@ -16,6 +16,11 @@
         "bitset": "cpp",
         "algorithm": "cpp",
         "format": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "unordered_map": "cpp",
+        "initializer_list": "cpp",
+        "regex": "cpp",
+        "optional": "cpp",
+        "text_encoding": "cpp"
     }
 }

@@ -74,7 +74,6 @@ Trade parseLine(string inputString) {
         return trade;
     } catch (const exception& e) {
         // Catch errors with e.what(), automatically outputting the reason for the error message
-        cout << "Skipping bad row. Reason: " << e.what() << endl;
         
         return Trade{"", 0.0, 0, ""};
     }
@@ -83,7 +82,9 @@ Trade parseLine(string inputString) {
 // Reads the CSV file and loads valid records into memory
 vector<Trade> loadTrades(const string& filename) {
     vector<Trade> trades;
+    int skippedCount = 0;
     ifstream file(filename);
+    ofstream errorLog("errors.csv");
 
     if (!file.is_open()) {
         // Exit early if the file is missing or corrupted
@@ -96,8 +97,14 @@ vector<Trade> loadTrades(const string& filename) {
         Trade tempTrade = parseLine(line);
         if (tempTrade.ticker != "") {
             trades.push_back(tempTrade);
+        } else {
+            skippedCount++;
+            errorLog << line << endl;
         }
     }
+
+    cout << "Skipped " << skippedCount << " malformed rows." << endl;
+    this_thread::sleep_for(chrono::seconds(5));
 
     return trades;
 }
@@ -125,6 +132,12 @@ unordered_map<string, CompanyMetrics> computeMetrics(const vector<Trade>& trades
 
 // Displays final calculated metrics to the screen
 void printReport(const unordered_map<string, CompanyMetrics>& statsMap) {
+    cout << left << setw(8) << "TICKER"
+            << right << setw(12) << "VWAP"
+            << setw(12) << "MIN"
+            << setw(12) << "MAX"
+            << setw(14) << "VOLUME" << endl;
+
     // Print final analytics for each unique company in the map
     for (const auto& pair : statsMap) {
         double vwap = 0.0;
@@ -133,12 +146,12 @@ void printReport(const unordered_map<string, CompanyMetrics>& statsMap) {
         if (pair.second.totalVolume > 0) {
             vwap = pair.second.weightedPriceSum / pair.second.totalVolume;
         }
-        
-        cout << "Ticker: " << pair.first 
-                << ", VWAP: " << vwap 
-                << ", Minimum Price: " << pair.second.minPrice 
-                << ", Maximum Price: " << pair.second.maxPrice 
-                << ", Total Volume: " << pair.second.totalVolume << endl;
+
+        cout << left  << setw(8)  << pair.first
+             << right << setw(12) << vwap
+             << setw(12) << pair.second.minPrice
+             << setw(12) << pair.second.maxPrice
+             << setw(14) << pair.second.totalVolume << endl;
     }
 }
 
@@ -223,14 +236,31 @@ void runBenchmark(const vector<Trade>& trades) {
     }
 }
 
+void runDashboard(const vector<Trade>& trades, int numWorkers) {
+    int i = 1;
+
+    while (true) {
+        int end = trades.size() * i / 10;
+
+        if (end > trades.size()) {
+            end = trades.size();
+        }
+
+        vector<Trade> partialData(trades.begin(), trades.begin() + end);
+        unordered_map<string, CompanyMetrics> merged = runMultithreaded(partialData, numWorkers);
+
+        system("cls");
+        printReport(merged);
+        this_thread::sleep_for(chrono::milliseconds(500));
+   
+        i++;
+    }
+}
 
 // Runs the program from start to finish
 int main()
 {
     vector<Trade> trades = loadTrades("trades.csv");
-
-    // unordered_map<string, CompanyMetrics> merged = runMultithreaded(trades, 4);
-    // printReport(merged);
-
-    runBenchmark(trades);
+    runDashboard(trades, 4);
+    // runBenchmark(trades);
 }
